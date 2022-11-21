@@ -8,6 +8,9 @@ pub use set::BTreeSet;
 
 mod node;
 mod search;
+#[cfg(test)]
+mod tests;
+
 use crate::TryReserveError;
 
 #[doc(hidden)]

@@ -14,6 +14,7 @@ keywords = ["fallible", "collections"]
 hashbrown = "0.12.1"
 
 [features]
+default = ["unstable", "rust_1_57", "std"]
 # Enable on nightly builds to allow use of unstable features
 unstable = []
 # Functionality based on std::io types

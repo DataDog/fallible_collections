@@ -638,6 +638,17 @@ impl<K: Ord, V> BTreeMap<K, V> {
         }
     }
 
+    pub fn get_many<'a, 'b, Q>(
+        &'a self,
+        keys: &'a [Q],
+        values: &'b mut alloc::vec::Vec<Option<&'a V>>,
+    ) where
+        K: Borrow<Q> + 'a,
+        Q: Ord + 'a,
+    {
+        search::search_tree_many(self.root.as_ref(), keys, values)
+    }
+
     /// Returns the key-value pair corresponding to the supplied key.
     ///
     /// The supplied key may be any borrowed form of the map's key type, but the ordering
