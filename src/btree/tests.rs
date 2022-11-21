@@ -23,5 +23,4 @@ fn test_lookup_sorted() {
         (0..64).map(|v| Some(v)).collect::<Vec<_>>(),
         out.iter().map(|x| x.cloned()).collect::<Vec<_>>()
     );
-    // println!("{:#?}", out);
 }

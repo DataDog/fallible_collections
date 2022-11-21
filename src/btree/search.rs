@@ -137,7 +137,6 @@ pub(crate) fn search_tree_many<'a, 'b, K: 'a, V: 'a, Q>(
             match search_node_at(cur_node, &k, idx) {
                 Found(handle) => {
                     idx = handle.idx;
-                    // out.push(Some(cur_node.values[i].clone()));
                     out.push(Some(handle.into_kv().1));
                     continue 'next_key;
                 }
@@ -149,8 +148,6 @@ pub(crate) fn search_tree_many<'a, 'b, K: 'a, V: 'a, Q>(
                             continue 'next_key;
                         }
                         Internal(internal) => {
-                            // node = internal.descend();
-                            // continue;
                             if let Ok(right) = internal.right_kv() {
                                 stack.push(std::mem::replace(
                                     &mut cur_bound,
