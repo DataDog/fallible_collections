@@ -11,6 +11,7 @@ readme = "README.md"
 keywords = ["fallible", "collections"]
 
 [dependencies]
+arrayvec = "0.7.2"
 hashbrown = "0.12.1"
 
 [features]

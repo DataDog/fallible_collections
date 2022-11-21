@@ -114,7 +114,8 @@ pub(crate) fn search_tree_many<'a, 'b, K: 'a, V: 'a, Q>(
     K: Borrow<Q>,
 {
     let mut cur_node = node;
-    let mut stack = alloc::vec::Vec::with_capacity(16);
+    // 18 levels is enough to have more than 2^64 elements in the tree
+    let mut stack = arrayvec::ArrayVec::<_, 18>::new();
 
     let mut cur_bound = Bound {
         node,
