@@ -44,6 +44,13 @@ use alloc::boxed::Box;
 const B: usize = 6;
 pub const MIN_LEN: usize = B - 1;
 pub const CAPACITY: usize = 2 * B - 1;
+// Ideally we want to have:
+// ```
+// pub const MAX_DEPTH = (usize::BITS as f64 / (CAPACITY as f64 + 1.0).log2()).ceil() as usize;
+// ```
+// but f64 functions are not const. Thus we compute the upper bound with:
+pub const MAX_DEPTH: usize =
+    (usize::BITS / (usize::BITS - (CAPACITY + 1).leading_zeros() - 1) + 1) as usize;
 
 /// The underlying representation of leaf nodes. Note that it is often unsafe to actually store
 /// these, since only the first `len` keys and values are assumed to be initialized. As such,
@@ -867,7 +874,7 @@ impl<BorrowType, K, V> NodeRef<BorrowType, K, V, marker::LeafOrInternal> {
 /// to the left of the node, one between the two pairs, and one at the right of the node.
 pub struct Handle<Node, Type> {
     node: Node,
-    pub idx: usize,
+    idx: usize,
     _marker: PhantomData<Type>,
 }
 
@@ -884,6 +891,11 @@ impl<Node, Type> Handle<Node, Type> {
     /// Retrieves the node that contains the edge of key/value pair this handle points to.
     pub fn into_node(self) -> Node {
         self.node
+    }
+
+    /// Retrieves the node and edge index.
+    pub fn into_node_and_index(self) -> (Node, usize) {
+        (self.node, self.idx)
     }
 }
 

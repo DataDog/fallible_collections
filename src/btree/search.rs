@@ -48,14 +48,14 @@ where
 }
 
 pub fn search_node_at<BorrowType, K, V, Type, Q: ?Sized>(
-    node: NodeRef<BorrowType, K, V, Type>,
+    handle: Handle<NodeRef<BorrowType, K, V, Type>, marker::Edge>,
     key: &Q,
-    start: usize,
 ) -> SearchResult<BorrowType, K, V, Type, Type>
 where
     Q: Ord,
     K: Borrow<Q>,
 {
+    let (node, start) = handle.into_node_and_index();
     match search_linear_at(&node, key, start) {
         (idx, true) => Found(Handle::new_kv(node, idx)),
         (idx, false) => SearchResult::GoDown(Handle::new_edge(node, idx)),
@@ -99,12 +99,6 @@ where
     (node.keys().len(), false)
 }
 
-struct Bound<'a, BorrowType, K, V> {
-    node: NodeRef<BorrowType, K, V, marker::LeafOrInternal>,
-    key: Option<&'a K>,
-    idx: usize,
-}
-
 pub(crate) fn search_tree_many<'a, 'b, K: 'a, V: 'a, Q>(
     node: NodeRef<marker::Immut<'a>, K, V, marker::LeafOrInternal>,
     keys: &'a [Q],
@@ -113,53 +107,38 @@ pub(crate) fn search_tree_many<'a, 'b, K: 'a, V: 'a, Q>(
     Q: Ord,
     K: Borrow<Q>,
 {
-    let mut cur_node = node;
-    // 18 levels is enough to have more than 2^64 elements in the tree
-    let mut stack = arrayvec::ArrayVec::<_, 18>::new();
+    let mut cur_node = node.first_edge();
+    let mut stack = arrayvec::ArrayVec::<_, { super::node::MAX_DEPTH }>::new();
 
-    let mut cur_bound = Bound {
-        node,
-        key: None,
-        idx: 0,
-    };
-    let mut idx = 0;
+    let mut cur_bound = node.last_edge();
     'next_key: for k in keys {
         while !cur_bound
-            .key
-            .map(|right_bound| k < right_bound.borrow())
+            .right_kv()
+            .map(|right_bound| k < right_bound.into_kv().0.borrow())
             .unwrap_or(true)
         {
-            cur_node = cur_bound.node;
-            idx = cur_bound.idx;
+            cur_node = cur_bound;
             cur_bound = stack.pop().unwrap();
         }
         'search: loop {
-            match search_node_at(cur_node, &k, idx) {
+            match search_node_at(cur_node, &k) {
                 Found(handle) => {
-                    idx = handle.idx;
+                    cur_node = handle.left_edge();
                     out.push(Some(handle.into_kv().1));
                     continue 'next_key;
                 }
                 GoDown(handle) => {
-                    idx = handle.idx;
+                    cur_node = handle;
                     match handle.force() {
                         Leaf(_) => {
                             out.push(None);
                             continue 'next_key;
                         }
                         Internal(internal) => {
-                            if let Ok(right) = internal.right_kv() {
-                                stack.push(std::mem::replace(
-                                    &mut cur_bound,
-                                    Bound {
-                                        node: cur_node,
-                                        key: Some(right.into_kv().0),
-                                        idx,
-                                    },
-                                ));
+                            if internal.right_kv().is_ok() {
+                                stack.push(std::mem::replace(&mut cur_bound, cur_node));
                             };
-                            cur_node = internal.descend();
-                            idx = 0;
+                            cur_node = internal.descend().first_edge();
                             continue 'search;
                         }
                     }
