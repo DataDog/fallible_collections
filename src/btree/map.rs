@@ -772,6 +772,140 @@ impl<K: Ord, V> BTreeMap<K, V> {
         }
     }
 
+    pub fn try_insert_many<I>(&mut self, kvs: I) -> Result<(), TryReserveError>
+    where
+        I: IntoIterator<Item = (K, V)>,
+        K: core::fmt::Debug,
+    {
+        self.ensure_root_is_owned()?;
+        let mut cur_node = self.root.as_mut().first_edge();
+        let mut stack = arrayvec::ArrayVec::<_, { super::node::MAX_DEPTH }>::new();
+
+        let mut cur_bound: Option<
+            Handle<NodeRef<marker::Mut<'_>, K, V, marker::LeafOrInternal>, marker::Edge>,
+        > = None;
+        'next_key: for (k, v) in kvs.into_iter() {
+            // std::dbg!(&k);
+            while !unsafe {
+                cur_bound
+                    .as_mut()
+                    .map(|cur_bound| {
+                        cur_bound
+                            .reborrow_mut()
+                            .right_kv()
+                            .map(|mut right_bound| &k < right_bound.kv_mut().0.borrow())
+                            .unwrap_or(true)
+                    })
+                    .unwrap_or(true)
+            } {
+                // std::dbg!(&cur_bound);
+                cur_node = cur_bound.unwrap();
+                cur_bound = stack.pop().unwrap();
+            }
+            // let out_ptr;
+
+            let mut ins_k;
+            let mut ins_v;
+            let mut ins_edge;
+            let mut cur_parent;
+            'search: loop {
+                match search::search_node_at(cur_node, &k) {
+                    Found(mut handle) => {
+                        // std::println!("  found {:?}", &handle);
+                        cur_node = unsafe { handle.reborrow_mut().left_edge().cast() };
+                        _ = mem::replace(handle.as_mut().kv_mut().1, v);
+                        continue 'next_key;
+                    }
+                    GoDown(mut handle) => {
+                        // std::println!("  go down {:?}", &handle);
+                        cur_node = unsafe { handle.reborrow_mut().cast() };
+                        match handle.force() {
+                            Leaf(handle) => {
+                                // std::println!("    leaf {:?}", &handle);
+                                self.length += 1;
+                                cur_parent = match handle
+                                    // .cast::<marker::Mut<'_>, marker::Leaf, marker::Edge>()
+                                    .insert(k, v)?
+                                {
+                                    (Fit(_handle), _) => {
+                                        // std::println!("      insert-fit {:?}", &handle);
+                                        // return Ok(handle.into_kv_mut().1)
+                                        continue 'next_key;
+                                    }
+                                    (Split(left, k, v, right), _ptr) => {
+                                        // std::println!("      insert-split k={:?}", &k);
+                                        ins_k = k;
+                                        ins_v = v;
+                                        ins_edge = right;
+                                        left.ascend()
+                                            .map(|parent| {
+                                                let (n, idx) =
+                                                    parent.reborrow().into_node_and_index();
+                                                if idx < n.len() {
+                                                    cur_bound = stack.pop().unwrap();
+                                                    // std::println!(
+                                                    //     "      poped bound: {:?}",
+                                                    //     &cur_bound
+                                                    // );
+                                                }
+                                                parent
+                                            })
+                                            .map_err(|n| n.into_root_mut())
+                                    }
+                                };
+                                break 'search;
+                            }
+                            Internal(mut internal) => {
+                                if unsafe { internal.reborrow_mut().right_kv().is_ok() } {
+                                    // std::println!("    push bound {:?}", cur_node);
+                                    stack.push(std::mem::replace(&mut cur_bound, Some(cur_node)));
+                                };
+                                cur_node = internal.descend().first_edge();
+                                continue 'search;
+                            }
+                        }
+                    }
+                }
+            } // 'search
+            cur_node = 'insert: loop {
+                match cur_parent {
+                    Ok(parent) => match parent.insert(ins_k, ins_v, ins_edge)? {
+                        Fit(handle) => {
+                            // std::println!("      insert-fit {:?}", &handle);
+                            break 'insert handle.cast();
+                        }
+                        Split(left, k, v, right) => {
+                            // std::println!("      insert-split k={:?}", &k);
+                            ins_k = k;
+                            ins_v = v;
+                            ins_edge = right;
+                            cur_parent = left
+                                .ascend()
+                                .map(|parent| {
+                                    let (n, idx) = parent.reborrow().into_node_and_index();
+                                    if idx < n.len() {
+                                        cur_bound = stack.pop().unwrap();
+                                        // std::println!("      poped bound: {:?}", &cur_bound);
+                                    }
+                                    parent
+                                })
+                                .map_err(|n| n.into_root_mut());
+                        }
+                    },
+                    Err(root) => {
+                        // std::println!("      insert-root");
+                        assert!(stack.is_empty());
+                        root.push_level()?.push(ins_k, ins_v, ins_edge);
+                        cur_bound = None;
+                        // cur_bound = root.as_ref().last_edge();
+                        break 'insert root.as_mut().first_edge();
+                    }
+                }
+            };
+        }
+        Ok(())
+    }
+
     /// Removes a key from the map, returning the value at the key if the key
     /// was previously in the map.
     ///
