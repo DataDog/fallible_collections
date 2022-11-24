@@ -108,6 +108,33 @@ struct LeafNode<K, V> {
     vals: [MaybeUninit<V>; CAPACITY],
 }
 
+impl<K, V> core::fmt::Debug for LeafNode<K, V>
+where
+    K: core::fmt::Debug,
+{
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        unsafe {
+            if self.len >= 1 {
+                writeln!(
+                    f,
+                    "LeafNode pidx={} len={} [{:?}..{:?}]",
+                    self.parent_idx.assume_init_ref(),
+                    self.len,
+                    self.keys[0].assume_init_ref(),
+                    self.keys[self.len as usize - 1].assume_init_ref()
+                )
+            } else {
+                writeln!(
+                    f,
+                    "LeafNode pidx={} len={} []",
+                    self.parent_idx.assume_init_ref(),
+                    self.len
+                )
+            }
+        }
+    }
+}
+
 impl<K, V> LeafNode<K, V> {
     /// Creates a new `LeafNode`. Unsafe because all nodes should really be hidden behind
     /// `BoxedNode`, preventing accidental dropping of uninitialized keys and values.
@@ -356,6 +383,22 @@ pub struct NodeRef<BorrowType, K, V, Type> {
     _marker: PhantomData<(BorrowType, Type)>,
 }
 
+impl<BorrowType, K, V, Type> core::fmt::Debug for NodeRef<BorrowType, K, V, Type>
+where
+    K: core::fmt::Debug,
+{
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("NodeRef")
+            .field("height", &self.height)
+            .field("node", unsafe { self.node.as_ref() })
+            .finish()
+        // if !self.root.is_null() {
+        //     s.field("root", unsafe { &*self.root });
+        // }
+        // s.finish()
+    }
+}
+
 impl<'a, K: 'a, V: 'a, Type> Copy for NodeRef<marker::Immut<'a>, K, V, Type> {}
 impl<'a, K: 'a, V: 'a, Type> Clone for NodeRef<marker::Immut<'a>, K, V, Type> {
     fn clone(&self) -> Self {
@@ -396,7 +439,16 @@ impl<BorrowType, K, V, Type> NodeRef<BorrowType, K, V, Type> {
 
     /// Removes any static information about whether this node is a `Leaf` or an
     /// `Internal` node.
-    pub fn forget_type(self) -> NodeRef<BorrowType, K, V, marker::LeafOrInternal> {
+    pub fn forget_type(&self) -> NodeRef<BorrowType, K, V, marker::LeafOrInternal> {
+        NodeRef {
+            height: self.height,
+            node: self.node,
+            root: self.root,
+            _marker: PhantomData,
+        }
+    }
+
+    pub fn cast<BorrowType2, Type2>(&self) -> NodeRef<BorrowType2, K, V, Type2> {
         NodeRef {
             height: self.height,
             node: self.node,
@@ -406,7 +458,16 @@ impl<BorrowType, K, V, Type> NodeRef<BorrowType, K, V, Type> {
     }
 
     /// Temporarily takes out another, immutable reference to the same node.
-    fn reborrow<'a>(&'a self) -> NodeRef<marker::Immut<'a>, K, V, Type> {
+    pub fn reborrow<'a>(&'a self) -> NodeRef<marker::Immut<'a>, K, V, Type> {
+        NodeRef {
+            height: self.height,
+            node: self.node,
+            root: self.root,
+            _marker: PhantomData,
+        }
+    }
+
+    fn as_mut<'a>(&'a self) -> NodeRef<marker::Mut<'a>, K, V, Type> {
         NodeRef {
             height: self.height,
             node: self.node,
@@ -537,7 +598,7 @@ impl<'a, K, V, Type> NodeRef<marker::Mut<'a>, K, V, Type> {
     /// of a reborrowed handle, out of bounds.
     // FIXME(@gereeter) consider adding yet another type parameter to `NodeRef` that restricts
     // the use of `ascend` and `into_root_mut` on reborrowed pointers, preventing this unsafety.
-    unsafe fn reborrow_mut(&mut self) -> NodeRef<marker::Mut<'_>, K, V, Type> {
+    pub unsafe fn reborrow_mut(&mut self) -> NodeRef<marker::Mut<'_>, K, V, Type> {
         NodeRef {
             height: self.height,
             node: self.node,
@@ -878,6 +939,18 @@ pub struct Handle<Node, Type> {
     _marker: PhantomData<Type>,
 }
 
+impl<Node, Type> core::fmt::Debug for Handle<Node, Type>
+where
+    Node: core::fmt::Debug,
+{
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("Handle")
+            .field("idx", &self.idx)
+            .field("node", &self.node)
+            .finish()
+    }
+}
+
 impl<Node: Copy, Type> Copy for Handle<Node, Type> {}
 // We don't need the full generality of `#[derive(Clone)]`, as the only time `Node` will be
 // `Clone`able is when it is an immutable reference and therefore `Copy`.
@@ -933,10 +1006,45 @@ impl<BorrowType, K, V, NodeType, HandleType>
     Handle<NodeRef<BorrowType, K, V, NodeType>, HandleType>
 {
     /// Temporarily takes out another, immutable handle on the same location.
+    pub fn forget_type(
+        &self,
+    ) -> Handle<NodeRef<BorrowType, K, V, marker::LeafOrInternal>, HandleType> {
+        // We can't use Handle::new_kv or Handle::new_edge because we don't know our type
+        Handle {
+            node: self.node.forget_type(),
+            idx: self.idx,
+            _marker: PhantomData,
+        }
+    }
+}
+
+impl<BorrowType, K, V, NodeType, HandleType>
+    Handle<NodeRef<BorrowType, K, V, NodeType>, HandleType>
+{
+    /// Temporarily takes out another, immutable handle on the same location.
     pub fn reborrow(&self) -> Handle<NodeRef<marker::Immut<'_>, K, V, NodeType>, HandleType> {
         // We can't use Handle::new_kv or Handle::new_edge because we don't know our type
         Handle {
             node: self.node.reborrow(),
+            idx: self.idx,
+            _marker: PhantomData,
+        }
+    }
+
+    pub fn cast<BorrowType2, NodeType2, HandleType2>(
+        &self,
+    ) -> Handle<NodeRef<BorrowType2, K, V, NodeType2>, HandleType2> {
+        Handle {
+            node: self.node.cast(),
+            idx: self.idx,
+            _marker: PhantomData,
+        }
+    }
+
+    pub fn as_mut(&self) -> Handle<NodeRef<marker::Mut<'_>, K, V, NodeType>, HandleType> {
+        // We can't use Handle::new_kv or Handle::new_edge because we don't know our type
+        Handle {
+            node: self.node.as_mut(),
             idx: self.idx,
             _marker: PhantomData,
         }
