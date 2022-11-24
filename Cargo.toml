@@ -10,6 +10,9 @@ description = "a crate which adds fallible allocation api to std collections"
 readme = "README.md"
 keywords = ["fallible", "collections"]
 
+[lib]
+bench = false
+
 [dependencies]
 arrayvec = "0.7.2"
 hashbrown = "0.12.1"
@@ -24,3 +27,16 @@ std_io = ["std"]
 std = []
 # Use fallible functions added in Rust 1.57
 rust_1_57 = []
+
+[dev-dependencies]
+rand = "0.8.5"
+rand_distr = "0.4.3"
+criterion = "0.4.0"
+
+[[bench]]
+name = "btree"
+harness = false
+
+[[bench]]
+name = "hash_map"
+harness = false
